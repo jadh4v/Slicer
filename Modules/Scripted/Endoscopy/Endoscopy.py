@@ -5,6 +5,7 @@ import vtk.util.numpy_support
 
 import slicer
 from slicer.ScriptedLoadableModule import *
+from PoseInterpolation import *
 
 
 #
@@ -181,6 +182,9 @@ class EndoscopyWidget(ScriptedLoadableModuleWidget):
     inputFiducialsNodeSelector.setMRMLScene(slicer.mrmlScene)
     outputPathNodeSelector.setMRMLScene(slicer.mrmlScene)
 
+    # SDJ setup initial list of plane markups
+    self.orientations = []
+
   def setCameraNode(self, newCameraNode):
     """Allow to set the current camera node.
     Connected to signal 'currentNodeChanged()' emitted by camera node selector."""
@@ -232,7 +236,7 @@ class EndoscopyWidget(ScriptedLoadableModuleWidget):
     fiducialsNode = self.inputFiducialsNodeSelector.currentNode()
     outputPathNode = self.outputPathNodeSelector.currentNode()
     print("Calculating Path...")
-    result = EndoscopyComputePath(fiducialsNode)
+    result = EndoscopyComputePath(self.orientations, fiducialsNode)
     print("-> Computed path contains %d elements" % len(result.path))
 
     print("Create Model...")
@@ -344,11 +348,38 @@ class EndoscopyComputePath:
 
   """
 
-  def __init__(self, fiducialListNode, dl = 0.5):
+  def __init__(self, orientations, fiducialListNode, dl = 0.5):
     import numpy
     self.dl = dl # desired world space step size (in mm)
     self.dt = dl # current guess of parametric stepsize
     self.fids = fiducialListNode
+
+    # SDJ
+    # Insert Plane markups at control points.
+    scene = slicer.mrmlScene
+    controlPoints = vtk.vtkPoints()
+    self.fids.GetControlPointPositionsWorld(controlPoints)
+    for cpIndex in range(controlPoints.GetNumberOfPoints()):
+      cpPosition = controlPoints.GetPoint(cpIndex)
+      if (cpIndex < len(orientations)):
+        orientations[cpIndex].SetCenter(cpPosition)
+      else:
+        planeNode = scene.AddNewNodeByClass("vtkMRMLMarkupsPlaneNode", scene.GenerateUniqueName("Orientation-%s" % self.fids.GetName()))
+        planeMarkupDisplayNode = planeNode.GetMarkupsDisplayNode()
+        # planeMarkupDisplayNode.SetGlyphSize(0.0001)
+        # hack to hide sphere glyph that can also be used for translating by
+        # grabbing with mouse.  We don't want the user to directly translate
+        # these planes. planeMarkupDisplayNode.SetGlyphScale(0.0001) hack to
+        # hide sphere glyph that can also be used for translating by
+        # grabbing with mouse. We don't want the user to directly translate
+        # these planes.
+        planeNode.SetNthControlPointVisibility(0, False)
+        planeNode.SetNthControlPointVisibility(1, False)
+        planeMarkupDisplayNode.SetTranslationHandleVisibility(False)
+        planeMarkupDisplayNode.SetScaleHandleVisibility(False)
+        planeMarkupDisplayNode.SetRotationHandleVisibility(True)
+        planeNode.SetCenter(cpPosition)
+        orientations.append(planeNode)
 
     # Already a curve, just get the points, sampled at equal distances.
     if (self.fids.GetClassName() == "vtkMRMLMarkupsCurveNode"
@@ -360,7 +391,16 @@ class EndoscopyComputePath:
         self.fids.SetNumberOfPointsPerInterpolatingSegment(pointsPerSegment)
       # Get equidistant points
       resampledPoints = vtk.vtkPoints()
-      slicer.vtkMRMLMarkupsCurveNode.ResamplePoints(self.fids.GetCurvePointsWorld(), resampledPoints, self.dl, self.fids.GetCurveClosed())
+      #SDJ
+      pedigreeIds = vtk.vtkDoubleArray()
+      slicer.vtkMRMLMarkupsCurveNode.ResamplePoints(self.fids.GetCurvePointsWorld(), resampledPoints, self.dl, self.fids.GetCurveClosed(), pedigreeIds)
+
+      # show me the pedigreeIds
+      print ("pedigreeIds: ")
+      for Id in range(pedigreeIds.GetNumberOfValues()):
+        print(pedigreeIds.GetValue(Id))
+        print(", ")
+
       # Restore original number of pointsPerSegment
       if originalPointsPerSegment<pointsPerSegment:
         self.fids.SetNumberOfPointsPerInterpolatingSegment(originalPointsPerSegment)

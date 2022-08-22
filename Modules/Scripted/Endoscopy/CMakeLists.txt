@@ -5,6 +5,7 @@ set(MODULE_NAME Endoscopy)
 #-----------------------------------------------------------------------------
 set(MODULE_PYTHON_SCRIPTS
   ${MODULE_NAME}.py
+  PoseInterpolation.py
   )
 
 set(MODULE_PYTHON_RESOURCES
